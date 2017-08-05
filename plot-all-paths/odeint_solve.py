@@ -1,140 +1,177 @@
-#!/usr/bin/python
-
-import numpy as np
-from scipy.integrate import odeint
-import sys
+#!usr/bin/python
 import matplotlib.pyplot as plt
+import matplotlib.widgets as widgets
+from mpl_toolkits.mplot3d import Axes3D
+import numpy as np
+import e_field_gen as e_field
+import odeint_solve as ode
+import sys as sys
 
 ELEC_MASS = 9.10938356E-31
 ELEC_CHARGE = -1.60217662E-19
 FUND_FREQ = 3.7474057E14
 SP_LIGHT = 3E8
+PL_FWHM = 25E-15
 FOCUS_RADIUS = 30E-6
-PL_FWHM = 5E-15
 PULSE_ENERGY = 0.6E-3
 EPSILON_o = 8.85418782E-12
-TIME_GRID = 20000
-
+TIME_GRID = 200
 
 INTENSITY = 1.88*(PULSE_ENERGY/(FOCUS_RADIUS**2*PL_FWHM))/np.pi #gaussian
 FIELD_AMP = np.sqrt(2*INTENSITY/(EPSILON_o*SP_LIGHT))
-FIELD_TOLERANCE = FIELD_AMP*1E-3
+FIELD_TOLERANCE = FIELD_AMP*1E-1
+FIELD_AMP_ION = np.sqrt(2E14/(EPSILON_o*SP_LIGHT))
+
+PONDER = (FIELD_AMP**2)*(ELEC_CHARGE**2)/(4*ELEC_MASS*(2*np.pi*FUND_FREQ)**2)
 
 
-def chop_start_end(vector, closeness):
-    b = np.where(np.diff(vector < closeness))[0] 
-    '''b is now an array of all zero crossings of vector'''
-    if len(b) <= 1:
-        '''must be a direct electron (vector==distance)'''
-        ret = np.zeros(len(vector))
-        ret[:] = np.Inf
-        return ret
-    else:
-        b_start = b[1]
-        '''first zero crossing always AT 0, so choose second crossing'''
-        diff = np.diff(vector[b_start:])
-        a = np.where(np.diff(np.sign(diff)))[0]
-        '''a contains locations of turning points after b_start'''
-        if len(a) <= 1:
-            ret = np.zeros(len(vector))
-            ret[:] = np.Inf
-            return ret
-        else:
-            a_end = a[1]
-            '''first turning point is the closest distance,
-            choose second to have a good looking plot'''
-#            print(a_end,b_start, diff)
-            front = vector[:b_start]
-            back = vector[b_start + a_end:]
-            front[:] = np.NaN
-            back[:] = np.NaN
-            return np.concatenate([front, vector[b_start:b_start + a_end], back])
- 
+def plot(*args, **kwargs):
+#    x = np.linspace(slider_12.val*PL_FWHM,(slider_12.val + slider_11.val)*PL_FWHM,200)
 
-def find_end(field, start, end, tol):
-    interval = (end - start)*10/TIME_GRID
-    probe = end
-    while np.sqrt((field[0](probe))**2 + (field[1](probe))**2) > tol:
-        probe+= interval
-    return probe
+#    z_field = args[1][1](x)
+    t2 = np.linspace(args[1], args[2], len(args[-1]))
+#    y = args[0][0]
+#    z = args[0][1]
+    dist = args[-1]
+#    closest = 1E-9*args[0][:,0]/PONDER
+#    mask = [0 if np.ma.is_masked(i) else np.NaN for i in np.ma.masked_invalid(closest)]
+#    time = args[0][:,1]
+    #kin_en = 1E-9*args[0][:,2]/np.max(args[0][:,2])
+    y_field = 1E-9*kwargs['field'][0](t2)/FIELD_AMP
+    ax1.clear()
+#    l = ax1.plot(time, closest, 'b')
+#    l2 = ax1.plot(time, mask, 'r.')
+    l = ax1.plot(t2, dist, 'b',t2, args[-2], 'r')
+    l1 = ax1.plot(t2,y_field, 'g')
+    #l2 = ax1.plot(time, kin_en, 'g')
+    ax1.set_ylim(-1E-9, 2E-9)
+    ax1.set_xlim(-5*PL_FWHM, -4*PL_FWHM)
+    fig1.canvas.draw_idle()
 
-def solve_path(field, start_i, end_i, optimize_collision=True,
-               pulsed=True, closeness=1, *args):
-    '''Solves the eqn for the electron path, returns closest approach
 
-    Args:
-        field (list, [y_comp, z_comp]),
-        start_ionize_time, end_ionize time,
-        bool (optimize collision?), bool (pulsed?)
-    Args(optional):
-        args[0] = cycle length of CW light
-        (compulsory if optimize_collision and not pulsed)
-        TODO: change time grid as a function input'''
 
-    def elec_path_y(x, t):
-           path, velocity = x
-           dydt = [velocity, ELEC_CHARGE*field[0](t)/ELEC_MASS]
-           return dydt
-    def elec_path_z(x, t):
-           path, velocity = x
-           dzdt = [velocity, ELEC_CHARGE*field[1](t)/ELEC_MASS]
-           return dzdt
-    initial_cond = [0., 0.]
-    if optimize_collision:
-        hard_end = 0
-        min_list = []
-        if pulsed:
-            hard_end = find_end(field, start_i, end_i, FIELD_TOLERANCE)
-        else:
-            #hard_end = 6*PL_FWHM
-            hard_end = start_i + 20/(FUND_FREQ)
-        interval = (hard_end - start_i)/(TIME_GRID - 1)
-        t = np.linspace(start_i, hard_end, TIME_GRID)
-        t_chopped = t[:np.argmax(t >= end_i)]
-        #print(start_i, end_i, hard_end, (t > end_i))
-        sol_y = odeint(elec_path_y, initial_cond, t)
-        sol_z = odeint(elec_path_z, initial_cond, t)
-        plt.plot(sol_y[:,1], 'b.')
-        throw = np.zeros(TIME_GRID - len(t_chopped))
-        throw[:] = np.NaN
-        '''these solve the diff eqn'''
-        start_e = start_i
-        for i in range(len(t_chopped)):
-            '''Optimize over multiple start times:
-            as the ode soln. is simply integrating the field twice,
-            we can easily generate solns. for diff. start times
-            by applying diff. boundary conditions and changing
-            the constants of integration. B.C. is always 0 pos & 0 vel.
-            at the start time. This is better than repeatedly calling odeint'''
-            a_y = -1*sol_y[i, 1]
-            if i==0:
-                print(sol_y, i)
-            b_y = -1*(sol_y[i, 0] + a_y*t[i])
-            a_z = -1*sol_z[i, 1]
-            b_z = -1*(sol_z[i, 0] + a_z*t[i])
-            y = sol_y[:, 0] + a_y*t + b_y
-            z = sol_z[:, 0] + a_z*t + b_z
-            #sol_y[:,1] = sol_y[:,1] + a_y
-            #sol_z[:,1] = sol_z[:,1] + a_z
-            #end
-            if i%10 == 0:
-                a = np.zeros(i)
-                a[:] = np.NaN
-                dist = np.concatenate([a, np.sqrt((y[i:])**2)])
-                                                  #+ z[i:]**2)])
-                min_list.append((dist, start_e))
-            #min_list.append((kin_energy, start_i))
-            start_e += interval
-        minimas = np.array(min_list)
-#        min_start = minimas[np.nanargmin(minimas, axis=0)[0], 1]
-        print(start_i, end_i)
-        #t = np.linspace(start_i, end_i, TIME_GRID)
-#        sol_y = odeint(elec_path_y, initial_cond, t, full_output=0)
-#        sol_z = odeint(elec_path_z, initial_cond, t, full_output=0)
-        return [minimas, t]
-#        return minimas
-    else:
-        t = np.linspace(start_i, hard_end, TIME_GRID)
-        sol_y = odeint(elec_path_y, initial_cond, t)
-        sol_z = odeint(elec_path_z, initial_cond, t)
-        return [0, sol_y[:,0], sol_z[:,0]]
+
+def update(val):
+
+    qwp_1 = slider_1.val
+    hwp_2 = slider_2.val
+    qwp_2 = slider_3.val
+    hwp_3 = slider_4.val
+    qwp_3 = slider_5.val
+    delay_1 = slider_6.val
+    delay_2 = slider_7.val
+    ampl_1 = slider_8.val
+    ampl_2 = slider_9.val
+    ampl_3 = slider_10.val
+    closeness = slider_13.val
+
+    a = e_field.e_field_gen(3, False, ampl_1*FIELD_AMP, ampl_2*FIELD_AMP,
+                            ampl_3*FIELD_AMP, 0,
+                            delay_1/FUND_FREQ, delay_2/FUND_FREQ,
+                            FUND_FREQ, 2*FUND_FREQ, 3*FUND_FREQ,
+                            [[qwp_1], [hwp_2, qwp_2], [hwp_3, qwp_3]],
+                            PL_FWHM, PL_FWHM, PL_FWHM,
+                            b1='q', b2='hq', b3='hq')
+
+    t = np.linspace(-5*PL_FWHM, 5*PL_FWHM, 50)
+    y_field = a[0](t)
+    z_field = a[1](t)
+    tot = np.sqrt(y_field**2 + z_field**2)
+    times = t#[j for i,j in zip(tot,t) if i > FIELD_AMP_ION]
+    b = ode.solve_path(a, times[0], times[0] + 2/(FUND_FREQ), True, False, closeness*1E-9)
+    #print(b)
+#    plot(b,a)
+    plot(b[2:4], b[0], b[1], b[4], b[5], field=a)
+#    plot(a)
+
+
+if __name__ == '__main__':
+
+
+    fig1 = plt.figure(1)
+    ax1 = plt.axes([0.05, 0.15, 0.9, 0.80])
+    #fig2 = plt.figure(2)
+    #ax2 = plt.axes([0.05, 0.15, 0.9, 0.80], projection='3d')
+    ax_slider_1 = plt.axes([0.1, 0.01, 0.2, 0.02])
+    ax_slider_2 = plt.axes([0.1, 0.04, 0.2, 0.02])
+    ax_slider_3 = plt.axes([0.1, 0.07, 0.2, 0.02])
+    ax_slider_4 = plt.axes([0.1, 0.1, 0.2, 0.02])
+    ax_slider_5 = plt.axes([0.1, 0.13, 0.2, 0.02])
+    ax_slider_6 = plt.axes([0.5, 0.01, 0.2, 0.02])
+    ax_slider_7 = plt.axes([0.5, 0.04, 0.2, 0.02])
+    ax_slider_8 = plt.axes([0.5, 0.07, 0.2, 0.02])
+    ax_slider_9 = plt.axes([0.5, 0.1, 0.2, 0.02])
+    ax_slider_10 = plt.axes([0.5, 0.13, 0.2, 0.02])
+    rax = plt.axes([0.0, 0.8, 0.1, 0.15])
+    ax_slider_11 = plt.axes([0.2, 0.97, 0.1, 0.02])
+    ax_slider_12 = plt.axes([0.6, 0.97, 0.1, 0.02])
+    ax_slider_13 = plt.axes([0.8, 0.97, 0.2, 0.02])
+    radio = widgets.RadioButtons(rax, ('CW', 'Pulsed'))
+    slider_1 = widgets.Slider(ax_slider_1, 'qwp_1', 0., 360)
+    slider_2 = widgets.Slider(ax_slider_2, 'hwp_2', 0., 360)
+    slider_3 = widgets.Slider(ax_slider_3, 'qwp_2', 0., 360)
+    slider_4 = widgets.Slider(ax_slider_4, 'hwp_3', 0., 360)
+    slider_5 = widgets.Slider(ax_slider_5, 'qwp_3', 0., 360)
+    slider_6 = widgets.Slider(ax_slider_6, 'delay_2', -2, 2)
+    slider_7 = widgets.Slider(ax_slider_7, 'delay_3', -2, 2)
+    slider_8 = widgets.Slider(ax_slider_8, 'ampl_1', 0, 1)
+    slider_9 = widgets.Slider(ax_slider_9, 'ampl_2', 0, 1)
+    slider_10 = widgets.Slider(ax_slider_10, 'ampl_3', 0, 1)
+    slider_11 = widgets.Slider(ax_slider_11, 'x-size', 0, 4)
+    slider_12 = widgets.Slider(ax_slider_12, 'x-start', -2, 2)
+    slider_13 = widgets.Slider(ax_slider_13, 'close', 0, 1)
+    #start
+
+
+    qwp_1 = slider_1.val
+    hwp_2 = slider_2.val
+    qwp_2 = slider_3.val
+    hwp_3 = slider_4.val
+    qwp_3 = slider_5.val
+    delay_1 = slider_6.val
+    delay_2 = slider_7.val
+    ampl_1 = slider_8.val
+    ampl_2 = slider_9.val
+    ampl_3 = slider_10.val
+    closeness = slider_13.val
+
+    a = e_field.e_field_gen(3, False, ampl_1*FIELD_AMP, 0*FIELD_AMP,
+                            0*FIELD_AMP, 0,
+                            delay_1/FUND_FREQ, delay_2/FUND_FREQ,
+                            FUND_FREQ, 2*FUND_FREQ, 3*FUND_FREQ,
+                            [[45], [0, 0], [0, 0]],
+                            PL_FWHM, PL_FWHM, PL_FWHM,
+                            b1='q', b2='hq', b3='hq')
+
+    t = np.linspace(-5*PL_FWHM, 5*PL_FWHM, 50)
+    y_field = a[0](t)
+    z_field = a[1](t)
+    tot = np.sqrt(y_field**2 + z_field**2)
+    times = t#[j for i,j in zip(tot,t) if i > FIELD_AMP_ION]
+    b = ode.solve_path(a, times[0], times[0] + 2/(FUND_FREQ), True, False, closeness*1E-9)
+    #print(b)
+#    plot(b,a)
+    plot(b[2:4], b[0], b[1], b[4], b[5], field=a)
+#    plot(a)
+
+
+
+    #end
+    slider_1.on_changed(update)
+    slider_2.on_changed(update)
+    slider_3.on_changed(update)
+    slider_4.on_changed(update)
+    slider_5.on_changed(update)
+    slider_6.on_changed(update)
+    slider_7.on_changed(update)
+    slider_8.on_changed(update)
+    slider_9.on_changed(update)
+    slider_10.on_changed(update)
+    slider_11.on_changed(update)
+    slider_12.on_changed(update)
+    slider_13.on_changed(update)
+
+    radio.on_clicked(update)
+
+
+    plt.show()
