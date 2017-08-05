@@ -11,6 +11,25 @@ SP_LIGHT = 3E8
 
 
 class HorizLinPolLight():
+   '''creates a linearly polarized light wave with specified params.
+    Objects:
+        The "optic_dict" object holds the 2 available methods, which makes
+        it easy to call these methods programatically. E.g. to call half_wave_plate
+        on the beam 'beam_1', you can do: 
+                
+            beam_1.optic_dict['h'](angle)
+            
+        instead of
+        
+             beam_1.half_wave_plate(angle)
+         (Other objects are self-explanatory)
+
+    Methods:
+        half_wave_plate and quarter_wave_plate apply the relevant phase shifts to the components
+        of the beam, and take the angle wrt. horizontal as argument (deg.)
+        CAUTION: Setting angle to 0 does NOT make the plate disappear!
+                 You'll still see the relevant shifts.
+        '''
         
    def half_wave_plate(self, angle=0):
       a_11 = np.cos(np.pi*angle/90)
@@ -31,7 +50,7 @@ class HorizLinPolLight():
       self.jones_vec = np.dot(quarter_jones_mat, self.jones_vec)
 
    def __init__(self, freq, ampl=1, phase=0., pulse_width=0):
-      '''phase in deg'''
+      '''phase in sec'''
       self.freq = freq
       self.phase = phase
       self.pulse_width = pulse_width
@@ -50,6 +69,7 @@ def e_field_gen(num_beams, pulsed=True, *args, **kwargs):
 
     beams = []                   
     for i in range(num_beams):
+        """Creating the beams here"""
         beams.append(HorizLinPolLight(args[2*num_beams + i], args[i],
                                       args[num_beams + i],
                                       args[3*num_beams + 1 + i] if pulsed else 0))
@@ -65,17 +85,20 @@ def e_field_gen(num_beams, pulsed=True, *args, **kwargs):
 
 
     if not pulsed:
+        '''Add up all the y (or z) components of the beams given, apply envolope
+        if pulsed, and return a 2 member list of the functions that can generate
+        the field to the required degree of accuracy.'''
         ret = []
         def y_cw(t):
             y_comp = 0
             for beam in beams:
-                y_comp += np.real(np.exp(1j*2*np.pi*(t)*beam.freq)*beam.jones_vec[0][0])
-            return y_comp
+                y_comp += (np.exp(1j*2*np.pi*(t)*beam.freq)*beam.jones_vec[0][0])
+            return np.real(y_comp)
         def z_cw(t):
             z_comp = 0
             for beam in beams:
-                z_comp += np.real(np.exp(1j*2*np.pi*(t)*beam.freq)*beam.jones_vec[1][0])
-            return z_comp
+                z_comp += (np.exp(1j*2*np.pi*(t)*beam.freq)*beam.jones_vec[1][0])
+            return np.real(z_comp)
         ret.append(y_cw)
         ret.append(z_cw)
         return ret
