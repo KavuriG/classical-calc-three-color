@@ -21,13 +21,14 @@ FIELD_TOLERANCE = FIELD_AMP*1E-3
 
 
 def chop_start_end(vector, closeness):
-    b = np.where(np.diff(vector < closeness))[0] 
+    print(vector)
+    b = np.where(np.diff(vector < closeness))[0]
     '''b is now an array of all zero crossings of vector'''
     if len(b) <= 1:
         '''must be a direct electron (vector==distance)'''
         ret = np.zeros(len(vector))
         ret[:] = np.Inf
-        return ret
+        return np.Inf
     else:
         b_start = b[1]
         '''first zero crossing always AT 0, so choose second crossing'''
@@ -48,7 +49,7 @@ def chop_start_end(vector, closeness):
             front[:] = np.NaN
             back[:] = np.NaN
             return np.concatenate([front, vector[b_start:b_start + a_end], back])
- 
+
 
 def find_end(field, start, end, tol):
     interval = (end - start)*10/TIME_GRID
@@ -109,9 +110,9 @@ def solve_path(field, start_i, end_i, optimize_collision=True,
             y_path = sol_y[:,0] + a_y*t + b_y
             z_path = sol_z[:,0] + a_z*t + b_z
             #sol_y[:,1] = sol_y[:,1] + a_y
-            #sol_z[:,1] = sol_z[:,1] + a_z            
+            #sol_z[:,1] = sol_z[:,1] + a_z
             #end
-            dist = chop_start_end(np.sqrt(y_path[i]**2 + z_path[i:, 0]**2), closeness)
+            dist = chop_start_end(np.sqrt(y_path[i:]**2 + z_path[i:]**2), closeness)
             min_list.append((np.nanmin(dist), start_e))
             #min_list.append((kin_energy, start_i))
             start_e += interval
